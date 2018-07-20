@@ -109,6 +109,8 @@ RedisPersistence.prototype.addSubscriptions = function (client, subs, cb) {
   for (var i = 0; i < subs.length; i++) {
     var sub = subs[i]
     toStore[sub.topic] = sub.qos
+    var topicKey = 'topic-packets:'+sub.topic
+    this._db.lrange(topicKey, 0, this.maxSessionDelivery, dispatch)
   }
 
   this._db.sadd(clientsKey, client.id, finish)
@@ -116,10 +118,17 @@ RedisPersistence.prototype.addSubscriptions = function (client, subs, cb) {
 
   this._addedSubscriptions(client, subs, finish)
 
+  function dispatch(err, results) {
+    for (var i = 0, l = results.length; i < l; i++) {
+      client.deliverQoS(msgpack.decode(Buffer.from(results[i], 'base64')), function() {});
+    }
+    finish();
+  }
+
   function finish (err) {
     errored = err
     published++
-    if (published === 3) {
+    if (published === subs.length + 3) {
       cb(errored, client)
     }
   }
@@ -284,22 +293,22 @@ RedisPersistence.prototype.outgoingEnqueue = function (sub, packet, cb) {
 }
 
 RedisPersistence.prototype.outgoingEnqueueCombi = function (subs, packet, cb) {
-  if (!subs || subs.length === 0) {
-    return cb(null, packet)
-  }
   var count = 0
-  var outstanding = 1
+  var outstanding = 2
   var errored = false
   var packetKey = 'packet:' + packet.brokerId + ':' + packet.brokerCounter
   var countKey = 'packet:' + packet.brokerId + ':' + packet.brokerCounter + ':offlineCount'
+  var topicKey = 'topic-packets:'+packet.topic
   var ttl = this.packetTTL(packet)
   var encoded = msgpack.encode(new Packet(packet))
 
   this._db.mset(packetKey, encoded, countKey, subs.length, finish)
+  this._db.rpush(topicKey, encoded.toString('base64'), finish)
   if (ttl > 0) {
-    outstanding += 2
+    outstanding += 3
     this._db.expire(packetKey, ttl, finish)
     this._db.expire(countKey, ttl, finish)
+    this._db.expire(topicKey, ttl, finish)
   }
 
   for (var i = 0; i < subs.length; i++) {
@@ -602,6 +611,11 @@ RedisPersistence.prototype._buildAugment = function (listKey) {
       cb(err, decoded)
     })
   }
+}
+
+RedisPersistence.prototype.clearTopic = function(topic, cb) {
+  var topicKey = 'topic-packets:'+topic;
+  this._db.del(topicKey, cb);
 }
 
 RedisPersistence.prototype.destroy = function (cb) {
