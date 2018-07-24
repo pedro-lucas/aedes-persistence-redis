@@ -110,7 +110,7 @@ RedisPersistence.prototype.addSubscriptions = function (client, subs, cb) {
   for (var i = 0; i < subs.length; i++) {
     var sub = subs[i]
     toStore[sub.topic] = sub.qos
-    if(!client.subscriptions[sub]) {
+    if(!client.subscriptions[sub.topic]) {
       var topicKey = 'topic-packets:'+sub.topic
       this._db.lrange(topicKey, 0, this.maxSessionDelivery, dispatch)
       finishCount++;
