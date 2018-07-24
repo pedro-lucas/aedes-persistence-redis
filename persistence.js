@@ -105,12 +105,16 @@ RedisPersistence.prototype.addSubscriptions = function (client, subs, cb) {
   var toStore = {}
   var published = 0
   var errored
+  var finishCount = 0
 
   for (var i = 0; i < subs.length; i++) {
     var sub = subs[i]
     toStore[sub.topic] = sub.qos
-    var topicKey = 'topic-packets:'+sub.topic
-    this._db.lrange(topicKey, 0, this.maxSessionDelivery, dispatch)
+    if(!client.subscriptions[sub]) {
+      var topicKey = 'topic-packets:'+sub.topic
+      this._db.lrange(topicKey, 0, this.maxSessionDelivery, dispatch)
+      finishCount++;
+    }
   }
 
   this._db.sadd(clientsKey, client.id, finish)
@@ -120,15 +124,15 @@ RedisPersistence.prototype.addSubscriptions = function (client, subs, cb) {
 
   function dispatch(err, results) {
     for (var i = 0, l = results.length; i < l; i++) {
-      client.deliverQoS(msgpack.decode(Buffer.from(results[i], 'base64')), function() {});
+      client.deliverQoS(msgpack.decode(Buffer.from(results[i], 'base64')), function() {})
     }
-    finish();
+    finish()
   }
 
   function finish (err) {
     errored = err
     published++
-    if (published === subs.length + 3) {
+    if (published === finishCount + 3) {
       cb(errored, client)
     }
   }
